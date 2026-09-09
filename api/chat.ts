@@ -5,8 +5,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "./_lib/supabase.js";
 
-const GROK_API_URL = "https://api.x.ai/v1/chat/completions";
-const GROK_MODEL = process.env.GROK_MODEL || "grok-3-mini";
+ const GROK_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROK_MODEL = process.env.GROK_MODEL || "llama-3.3-70b-versatile";
 
 interface ChatBody {
   message: string;
@@ -124,7 +124,7 @@ d'appeler l'outil. Réponds toujours en français, de façon concise et chaleure
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROK_API_KEY}`,
+         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
         model: GROK_MODEL,
@@ -155,7 +155,7 @@ d'appeler l'outil. Réponds toujours en français, de façon concise et chaleure
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.GROK_API_KEY}`,
+         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
         model: GROK_MODEL,
