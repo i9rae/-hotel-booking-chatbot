@@ -177,6 +177,9 @@ d'appeler l'outil. Réponds toujours en français, de façon concise et chaleure
     return res.status(200).json({ reply: finalReply, toolResult });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: "Erreur lors du traitement de la demande." });
+    return res.status(500).json({
+      error: "Erreur lors du traitement de la demande.",
+      debug: err instanceof Error ? err.message : String(err),
+    });
   }
 }
