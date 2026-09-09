@@ -1,11 +1,11 @@
 // Fonction serverless Vercel — /api/chat
 // Variables d'environnement requises (Vercel > Settings > Environment Variables) :
-//   GROK_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
+//   GROQ_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabase } from "./_lib/supabase.js";
+import { supabase } from "./_lib/supabase";
 
- const GROK_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROK_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROK_MODEL = process.env.GROK_MODEL || "openai/gpt-oss-120b";
 
 interface ChatBody {
@@ -39,6 +39,11 @@ const tools = [
             type: "number",
             description: "Nombre total de personnes, adultes + enfants (optionnel)",
           },
+          keywords: {
+            type: "string",
+            description:
+              "Mots-clés décrivant ce que recherche le client dans l'ambiance ou les caractéristiques de la chambre (ex: 'vue sur mer', 'romantique', 'jacuzzi', 'familiale', 'balcon'). Optionnel — n'utilise ce champ que si le client décrit une ambiance ou une caractéristique précise, pas juste des dates/budget.",
+          },
         },
         required: ["start_date", "end_date"],
       },
@@ -51,10 +56,11 @@ async function runSearchCheapestOption(args: {
   end_date: string;
   max_budget?: number;
   guests?: number;
+  keywords?: string;
 }) {
   let query = supabase
     .from("daily_rates")
-    .select("date, price, room_types!inner(id, name, max_person)")
+    .select("date, price, room_types!inner(id, name, max_person, description)")
     .gte("date", args.start_date)
     .lte("date", args.end_date)
     .order("price", { ascending: true })
@@ -67,6 +73,24 @@ async function runSearchCheapestOption(args: {
     query = query.gte("room_types.max_person", args.guests);
   }
 
+  // Recherche par mots-clés dans la description de la chambre (ex: "vue sur
+  // mer", "romantique", "jacuzzi"). On découpe la phrase en mots significatifs
+  // et on garde toute chambre dont la description contient AU MOINS un de ces
+  // mots (recherche large, simple ILIKE — suffisant pour un prototype).
+  if (args.keywords) {
+    const words = args.keywords
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 2);
+
+    if (words.length > 0) {
+      const orFilter = words
+        .map((w) => `description.ilike.%${w}%`)
+        .join(",");
+      query = query.or(orFilter, { referencedTable: "room_types" });
+    }
+  }
+
   const { data, error } = await query;
 
   if (error) {
@@ -77,19 +101,22 @@ async function runSearchCheapestOption(args: {
   if (!data || data.length === 0) {
     return {
       found: false,
-      message: "Aucune chambre disponible ne correspond à ces critères sur cette période.",
+      message: args.keywords
+        ? "Aucune chambre ne correspond à cette description sur cette période."
+        : "Aucune chambre disponible ne correspond à ces critères sur cette période.",
     };
   }
 
   const best = data[0] as unknown as {
     date: string;
     price: number;
-    room_types: { id: string; name: string; max_person: number };
+    room_types: { id: string; name: string; max_person: number; description: string };
   };
 
   return {
     found: true,
     room_name: best.room_types.name,
+    room_description: best.room_types.description,
     date: best.date,
     price: best.price,
     max_person: best.room_types.max_person,
@@ -109,9 +136,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const systemPrompt = `Tu es l'assistant de réservation de l'hôtel. Tu aides les clients à
 trouver la chambre la moins chère selon leurs contraintes (dates flexibles, budget, nombre de
-personnes, équipements). Utilise l'outil search_cheapest_option dès que tu as au moins une
-plage de dates. Si des informations manquent (dates, nombre de personnes), demande-les avant
-d'appeler l'outil. Réponds toujours en français, de façon concise et chaleureuse.`;
+personnes, équipements). Si le client décrit une ambiance ou une caractéristique précise (vue
+sur mer, romantique, jacuzzi, familiale, balcon...), transmets ces mots-clés dans le paramètre
+keywords de l'outil. Utilise l'outil search_cheapest_option dès que tu as au moins une plage de
+dates. Si des informations manquent (dates, nombre de personnes), demande-les avant d'appeler
+l'outil. Réponds toujours en français, de façon concise et chaleureuse.`;
 
   const messages = [
     { role: "system", content: systemPrompt },
@@ -124,7 +153,7 @@ d'appeler l'outil. Réponds toujours en français, de façon concise et chaleure
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
         model: GROK_MODEL,
@@ -155,7 +184,7 @@ d'appeler l'outil. Réponds toujours en français, de façon concise et chaleure
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
         model: GROK_MODEL,
