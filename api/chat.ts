@@ -51,6 +51,15 @@ const tools = [
   },
 ];
 
+// Renvoie le nom de colonne à interroger dans daily_rates selon le nombre
+// de personnes demandé. "price" (colonne de base) sert de valeur par défaut
+// quand le client n'a pas précisé de nombre de personnes.
+function priceColumnForGuests(guests?: number): string {
+  if (!guests) return "price";
+  const clamped = Math.min(Math.max(Math.round(guests), 1), 8);
+  return `price_${clamped}`;
+}
+
 async function runSearchCheapestOption(args: {
   start_date: string;
   end_date: string;
@@ -58,25 +67,18 @@ async function runSearchCheapestOption(args: {
   guests?: number;
   keywords?: string;
 }) {
-  let query = supabase
-    .from("daily_rates")
-    .select("date, price, room_types!inner(id, name, max_person, description)")
-    .gte("date", args.start_date)
-    .lte("date", args.end_date)
-    .order("price", { ascending: true })
-    .limit(1);
+  const priceColumn = priceColumnForGuests(args.guests);
 
-  if (args.max_budget) {
-    query = query.lte("price", args.max_budget);
-  }
+  // 1. Sélectionne les chambres candidates : assez grandes pour le nombre de
+  // personnes, et correspondant aux mots-clés si le client en a donné.
+  let roomQuery = supabase
+    .from("room_types")
+    .select("id, name, description, max_person");
+
   if (args.guests) {
-    query = query.gte("room_types.max_person", args.guests);
+    roomQuery = roomQuery.gte("max_person", args.guests);
   }
 
-  // Recherche par mots-clés dans la description de la chambre (ex: "vue sur
-  // mer", "romantique", "jacuzzi"). On découpe la phrase en mots significatifs
-  // et on garde toute chambre dont la description contient AU MOINS un de ces
-  // mots (recherche large, simple ILIKE — suffisant pour un prototype).
   if (args.keywords) {
     const words = args.keywords
       .split(/\s+/)
@@ -84,42 +86,71 @@ async function runSearchCheapestOption(args: {
       .filter((w) => w.length > 2);
 
     if (words.length > 0) {
-      const orFilter = words
-        .map((w) => `description.ilike.%${w}%`)
-        .join(",");
-      query = query.or(orFilter, { referencedTable: "room_types" });
+      const orFilter = words.map((w) => `description.ilike.%${w}%`).join(",");
+      roomQuery = roomQuery.or(orFilter);
     }
   }
 
-  const { data, error } = await query;
+  const { data: rooms, error: roomsError } = await roomQuery;
 
-  if (error) {
-    console.error("Erreur Supabase:", error);
+  if (roomsError) {
+    console.error("Erreur Supabase (room_types):", roomsError);
     return { found: false, message: "Erreur lors de la recherche en base." };
   }
 
-  if (!data || data.length === 0) {
+  if (!rooms || rooms.length === 0) {
     return {
       found: false,
-      message: args.keywords
-        ? "Aucune chambre ne correspond à cette description sur cette période."
-        : "Aucune chambre disponible ne correspond à ces critères sur cette période.",
+      message: "Aucune chambre ne correspond à ces critères (taille ou description).",
     };
   }
 
-  const best = data[0] as unknown as {
-    date: string;
-    price: number;
-    room_types: { id: string; name: string; max_person: number; description: string };
-  };
+  // 2. Pour chaque chambre candidate, trouve sa date la moins chère dans la
+  // plage demandée, en lisant directement la colonne price_N correspondant
+  // au nombre de personnes (déjà calculée en base, pas de calcul ici).
+  const candidates = await Promise.all(
+    rooms.map(async (room) => {
+      const { data, error } = await supabase
+        .from("daily_rates")
+        .select(`date, ${priceColumn}`)
+        .eq("room_type_id", room.id)
+        .gte("date", args.start_date)
+        .lte("date", args.end_date)
+        .not(priceColumn, "is", null)
+        .order(priceColumn, { ascending: true })
+        .limit(1);
+
+      if (error || !data || data.length === 0) return null;
+
+      const row = data[0] as unknown as Record<string, string | number>;
+      const price = row[priceColumn] as number;
+
+      return { room, date: row.date as string, price };
+    })
+  );
+
+  const valid = candidates.filter((c): c is NonNullable<typeof c> => c !== null);
+
+  const affordable = args.max_budget
+    ? valid.filter((c) => c.price <= args.max_budget!)
+    : valid;
+
+  if (affordable.length === 0) {
+    return {
+      found: false,
+      message: "Aucune chambre disponible ne correspond à ces critères sur cette période.",
+    };
+  }
+
+  const best = affordable.sort((a, b) => a.price - b.price)[0];
 
   return {
     found: true,
-    room_name: best.room_types.name,
-    room_description: best.room_types.description,
+    room_name: best.room.name,
+    room_description: best.room.description,
     date: best.date,
     price: best.price,
-    max_person: best.room_types.max_person,
+    max_person: best.room.max_person,
   };
 }
 
