@@ -3,7 +3,7 @@
 //   GROK_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { supabase } from "./_lib/supabase";
+import { supabase } from "./_lib/supabase.js";
 
 const GROK_API_URL = "https://api.x.ai/v1/chat/completions";
 const GROK_MODEL = process.env.GROK_MODEL || "grok-3-mini";
