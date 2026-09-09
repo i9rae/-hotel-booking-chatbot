@@ -6,7 +6,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "./_lib/supabase.js";
 
  const GROK_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROK_MODEL = process.env.GROK_MODEL || "llama-3.3-70b-versatile";
+const GROK_MODEL = process.env.GROK_MODEL || "openai/gpt-oss-120b";
 
 interface ChatBody {
   message: string;
