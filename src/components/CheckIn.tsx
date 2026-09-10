@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import "../style/datepicker.css";
+import { useRoomContext } from "../context/RoomContext";
 
 /** CheckIn datepicker props: placement of calendar popover and optional full-width in container. */
 type CheckInProps = {
@@ -12,6 +13,8 @@ type CheckInProps = {
 
 /**
  * Check-in date field: react-datepicker with calendar icon toggle and single-calendar coordination.
+ * - Controlled via RoomContext (checkIn/setCheckIn) so the value is shared across the whole app
+ *   (search bar, RoomDetails reservation form, and the chatbot which can pre-fill it).
  * - Only one of CheckIn/CheckOut can be open at a time (custom event DATEPICKER_OPEN with id "checkin").
  * - suppressOpenRef prevents the lib's open logic from re-opening right after we close (e.g. on icon click).
  * - popperFullWidth: sets CSS var --datepicker-popper-width so calendar spans the wrapper (e.g. Room Details).
@@ -20,7 +23,7 @@ export default function CheckIn({
   popperPlacement = "bottom-start",
   popperFullWidth = false,
 }: CheckInProps) {
-  const [startDate, setStartDate] = useState<Date | null>(null);
+  const { checkIn, setCheckIn } = useRoomContext();
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const suppressOpenRef = useRef(false);
@@ -81,9 +84,9 @@ export default function CheckIn({
     setIsOpen(false);
   };
 
-  // On date select: update state, close calendar, briefly suppress to avoid re-open.
+  // On date select: update shared context, close calendar, briefly suppress to avoid re-open.
   const handleChange = (date: Date | null) => {
-    setStartDate(date);
+    setCheckIn(date);
     suppressOpenRef.current = true;
     setIsOpen(false);
     setTimeout(() => {
@@ -112,7 +115,7 @@ export default function CheckIn({
       </div>
       <DatePicker
         className="w-full h-full"
-        selected={startDate}
+        selected={checkIn}
         placeholderText="Check in"
         onChange={handleChange}
         popperPlacement={popperPlacement}

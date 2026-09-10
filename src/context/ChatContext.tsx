@@ -1,8 +1,17 @@
 import { createContext, useContext, useState, ReactNode } from "react";
 
+export interface SuggestedRoom {
+  roomId: number; // legacy_id, correspond à room.id côté frontend (route /room/:id)
+  name: string;
+  date: string; // YYYY-MM-DD
+  price: number;
+  guests: number | null;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  suggestedRoom?: SuggestedRoom;
 }
 
 interface ChatContextType {
@@ -46,11 +55,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       const data = await response.json();
 
+      const suggestedRoom: SuggestedRoom | undefined =
+        data.toolResult?.found && data.toolResult?.room_id
+          ? {
+              roomId: data.toolResult.room_id,
+              name: data.toolResult.room_name,
+              date: data.toolResult.date,
+              price: data.toolResult.price,
+              guests: data.toolResult.guests ?? null,
+            }
+          : undefined;
+
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
           content: data.reply || "Désolé, une erreur est survenue.",
+          suggestedRoom,
         },
       ]);
     } catch (err) {

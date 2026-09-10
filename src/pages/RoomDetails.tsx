@@ -5,6 +5,7 @@ import {
   KidsDropdown,
   ScrollToTop,
 } from "../components";
+import PriceSummary from "../components/PriceSummary";
 import { useRoomContext } from "../context/RoomContext";
 import { hotelRules } from "../data";
 import { useParams } from "react-router-dom";
@@ -15,10 +16,12 @@ import type { Facility } from "../types";
  * Room detail page: hero, description, facilities grid, reservation sidebar (dates + guests), hotel rules.
  * Room is resolved from URL param :id via useParams(); we look up in context rooms (so filtered list applies).
  * If room not found (e.g. bad id or filtered out), we show "Room not found." CheckIn/CheckOut use popperFullWidth here.
+ * checkIn/checkOut/adults/kids now come from the shared RoomContext (not local state), so a value set
+ * elsewhere (e.g. the chatbot pre-filling a recommended date) is reflected here automatically.
  */
 export default function RoomDetails() {
   const { id } = useParams<{ id: string }>();
-  const { rooms } = useRoomContext();
+  const { rooms, checkIn, checkOut, adults, kids } = useRoomContext();
   const room = rooms.find((r) => r.id === Number(id));
 
   if (!room) {
@@ -33,6 +36,7 @@ export default function RoomDetails() {
   }
 
   const { name, description, facilities, price, imageLg } = room;
+  const guests = +adults[0] + +kids[0];
 
   return (
     <section>
@@ -97,6 +101,12 @@ export default function RoomDetails() {
               <button type="button" className="btn btn-lg btn-primary w-full">
                 book now for ${price}
               </button>
+              <PriceSummary
+                legacyId={room.id}
+                checkIn={checkIn}
+                checkOut={checkOut}
+                guests={guests}
+              />
             </div>
             <div>
               <h3 className="h3">Hotel Rules</h3>

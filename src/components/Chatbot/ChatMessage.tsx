@@ -1,6 +1,10 @@
-import { ChatMessage as ChatMessageType } from "../../context/ChatContext";
+import { ChatMessage as ChatMessageType, SuggestedRoom } from "../../context/ChatContext";
 
-export default function ChatMessage({ role, content }: ChatMessageType) {
+type ChatMessageProps = ChatMessageType & {
+  onViewRoom?: (room: SuggestedRoom) => void;
+};
+
+export default function ChatMessage({ role, content, suggestedRoom, onViewRoom }: ChatMessageProps) {
   const isUser = role === "user";
 
   return (
@@ -13,6 +17,15 @@ export default function ChatMessage({ role, content }: ChatMessageType) {
         }`}
       >
         {content}
+        {suggestedRoom && onViewRoom && (
+          <button
+            type="button"
+            onClick={() => onViewRoom(suggestedRoom)}
+            className="mt-2 block w-full rounded-full bg-primary text-white text-xs font-medium py-1.5 px-3 hover:opacity-90"
+          >
+            Voir la {suggestedRoom.name}
+          </button>
+        )}
       </div>
     </div>
   );

@@ -2,15 +2,17 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { RoomContextValue } from '../types';
 import { roomData } from '../data';
 
-// Context holds room list, loading, guest counts, and filter/reset actions.
-// Default null; Provider in RoomContext() sets the value.
+// Context holds room list, loading, guest counts, check-in/check-out dates,
+// and filter/reset actions. Default null; Provider in RoomContext() sets the value.
 const RoomInfo = createContext<RoomContextValue | null>(null);
 
 /**
  * RoomContext provides room list, loading state, guest counts (adults/kids),
- * and check/reset actions. Used for filtering rooms by capacity.
+ * check-in/check-out dates, and check/reset actions.
  * - rooms: filtered list (or full roomData after reset).
  * - total: derived from first character of adults + kids strings (e.g. "2 Adults" -> 2).
+ * - checkIn/checkOut: shared across the app (search bar AND RoomDetails reservation form),
+ *   so a value set from one place (e.g. the chatbot) is visible everywhere.
  * - handleCheck: filters roomData by total <= room.maxPerson, then sets rooms after 3s (simulated loading).
  */
 export function RoomContext({ children }: { children: ReactNode }) {
@@ -19,6 +21,8 @@ export function RoomContext({ children }: { children: ReactNode }) {
   const [adults, setAdults] = useState('1 Adult');
   const [kids, setKids] = useState('0 Kid');
   const [total, setTotal] = useState(0);
+  const [checkIn, setCheckIn] = useState<Date | null>(null);
+  const [checkOut, setCheckOut] = useState<Date | null>(null);
 
   // Keep total in sync with adults/kids (e.g. "2 Adults" + "1 Kid" -> total 3).
   useEffect(() => {
@@ -50,6 +54,10 @@ export function RoomContext({ children }: { children: ReactNode }) {
     setAdults,
     kids,
     setKids,
+    checkIn,
+    setCheckIn,
+    checkOut,
+    setCheckOut,
     handleCheck,
     resetRoomFilterData,
   };

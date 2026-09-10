@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import "../style/datepicker.css";
+import { useRoomContext } from "../context/RoomContext";
 
 /** CheckOut datepicker props: same as CheckIn (placement + optional full-width). */
 type CheckOutProps = {
@@ -12,13 +13,14 @@ type CheckOutProps = {
 
 /**
  * Check-out date field: same behavior as CheckIn but with id "checkout" for single-calendar coordination.
+ * Controlled via RoomContext (checkOut/setCheckOut), same rationale as CheckIn.
  * Opening this calendar dispatches DATEPICKER_OPEN so CheckIn closes; and vice versa.
  */
 export default function CheckOut({
   popperPlacement = "bottom-start",
   popperFullWidth = false,
 }: CheckOutProps) {
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const { checkIn, checkOut, setCheckOut } = useRoomContext();
   const [isOpen, setIsOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const suppressOpenRef = useRef(false);
@@ -78,7 +80,7 @@ export default function CheckOut({
   };
 
   const handleChange = (date: Date | null) => {
-    setEndDate(date);
+    setCheckOut(date);
     suppressOpenRef.current = true;
     setIsOpen(false);
     setTimeout(() => {
@@ -107,7 +109,8 @@ export default function CheckOut({
       </div>
       <DatePicker
         className="w-full h-full"
-        selected={endDate}
+        selected={checkOut}
+        minDate={checkIn ?? undefined}
         placeholderText="Check out"
         onChange={handleChange}
         popperPlacement={popperPlacement}
@@ -121,3 +124,4 @@ export default function CheckOut({
     </div>
   );
 }
+

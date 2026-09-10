@@ -1,6 +1,6 @@
 // Fonction serverless Vercel — /api/chat
 // Variables d'environnement requises (Vercel > Settings > Environment Variables) :
-//   GROQ_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
+//   GROK_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "./_lib/supabase.js";
@@ -82,7 +82,7 @@ async function runSearchCheapestOption(args: {
   // personnes, et correspondant aux mots-clés si le client en a donné.
   let roomQuery = supabase
     .from("room_types")
-    .select("id, name, description, max_person, total_units");
+    .select("id, legacy_id, name, description, max_person, total_units");
 
   if (args.guests) {
     roomQuery = roomQuery.gte("max_person", args.guests);
@@ -176,11 +176,13 @@ async function runSearchCheapestOption(args: {
 
   return {
     found: true,
+    room_id: best.room.legacy_id,
     room_name: best.room.name,
     room_description: best.room.description,
     date: best.date,
     price: best.price,
     max_person: best.room.max_person,
+    guests: args.guests ?? null,
   };
 }
 

@@ -1,10 +1,14 @@
 import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { BsChatDots, BsX, BsSend } from "react-icons/bs";
-import { useChatContext } from "../../context/ChatContext";
+import { useChatContext, SuggestedRoom } from "../../context/ChatContext";
+import { useRoomContext } from "../../context/RoomContext";
 import ChatMessage from "./ChatMessage";
 
 export default function ChatWidget() {
   const { isOpen, toggleChat, messages, sending, sendMessage } = useChatContext();
+  const { setCheckIn, setCheckOut, setAdults, setKids } = useRoomContext();
+  const navigate = useNavigate();
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -17,6 +21,28 @@ export default function ChatWidget() {
     if (!input.trim() || sending) return;
     sendMessage(input.trim());
     setInput("");
+  };
+
+  // Au clic sur "Voir cette chambre" : pré-remplit le formulaire partagé
+  // (check-in = date trouvée, check-out = +1 nuit puisque le chatbot ne
+  // cherche que la date la moins chère, pas une durée de séjour) puis
+  // redirige vers la page de la chambre.
+  const handleViewRoom = (room: SuggestedRoom) => {
+    const checkInDate = new Date(room.date + "T00:00:00");
+    const checkOutDate = new Date(checkInDate);
+    checkOutDate.setDate(checkOutDate.getDate() + 1);
+
+    setCheckIn(checkInDate);
+    setCheckOut(checkOutDate);
+
+    if (room.guests) {
+      const clamped = Math.min(Math.max(room.guests, 1), 8);
+      setAdults(`${clamped} Adult${clamped > 1 ? "s" : ""}`);
+      setKids("0 Kid");
+    }
+
+    navigate(`/room/${room.roomId}`);
+    toggleChat();
   };
 
   return (
@@ -40,7 +66,7 @@ export default function ChatWidget() {
 
           <div className="flex-1 overflow-y-auto px-4 py-3">
             {messages.map((msg, i) => (
-              <ChatMessage key={i} role={msg.role} content={msg.content} />
+              <ChatMessage key={i} role={msg.role} content={msg.content} suggestedRoom={msg.suggestedRoom} onViewRoom={handleViewRoom} />
             ))}
             {sending && (
               <div className="mb-3 flex justify-start">
