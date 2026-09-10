@@ -60,6 +60,15 @@ function priceColumnForGuests(guests?: number): string {
   return `price_${clamped}`;
 }
 
+// Nombre de chambres déjà réservées (status confirmed) qui couvrent cette
+// date. end_date est exclusive (date de départ), comme une vraie réservation.
+function bookedUnitsOnDate(
+  bookings: { start_date: string; end_date: string }[],
+  isoDate: string
+): number {
+  return bookings.filter((b) => isoDate >= b.start_date && isoDate < b.end_date).length;
+}
+
 async function runSearchCheapestOption(args: {
   start_date: string;
   end_date: string;
@@ -73,7 +82,7 @@ async function runSearchCheapestOption(args: {
   // personnes, et correspondant aux mots-clés si le client en a donné.
   let roomQuery = supabase
     .from("room_types")
-    .select("id, name, description, max_person");
+    .select("id, name, description, max_person, total_units");
 
   if (args.guests) {
     roomQuery = roomQuery.gte("max_person", args.guests);
@@ -105,27 +114,47 @@ async function runSearchCheapestOption(args: {
     };
   }
 
-  // 2. Pour chaque chambre candidate, trouve sa date la moins chère dans la
-  // plage demandée, en lisant directement la colonne price_N correspondant
-  // au nombre de personnes (déjà calculée en base, pas de calcul ici).
+  // 2. Pour chaque chambre candidate : récupère les prix de daily_rates sur la
+  // plage (triés du moins cher au plus cher) et les réservations existantes
+  // qui chevauchent cette plage, puis prend la date la moins chère parmi
+  // celles où il reste au moins une unité disponible.
   const candidates = await Promise.all(
     rooms.map(async (room) => {
-      const { data, error } = await supabase
-        .from("daily_rates")
-        .select(`date, ${priceColumn}`)
-        .eq("room_type_id", room.id)
-        .gte("date", args.start_date)
-        .lte("date", args.end_date)
-        .not(priceColumn, "is", null)
-        .order(priceColumn, { ascending: true })
-        .limit(1);
+      const [{ data: rates, error: ratesError }, { data: bookings, error: bookingsError }] =
+        await Promise.all([
+          supabase
+            .from("daily_rates")
+            .select(`date, ${priceColumn}`)
+            .eq("room_type_id", room.id)
+            .gte("date", args.start_date)
+            .lte("date", args.end_date)
+            .not(priceColumn, "is", null)
+            .order(priceColumn, { ascending: true }),
+          supabase
+            .from("bookings")
+            .select("start_date, end_date")
+            .eq("room_type_id", room.id)
+            .eq("status", "confirmed")
+            .lt("start_date", args.end_date)
+            .gt("end_date", args.start_date),
+        ]);
 
-      if (error || !data || data.length === 0) return null;
+      if (ratesError || bookingsError || !rates) return null;
 
-      const row = data[0] as unknown as Record<string, string | number>;
-      const price = row[priceColumn] as number;
+      for (const row of rates as unknown as Record<string, string | number>[]) {
+        const isoDate = row.date as string;
+        const price = row[priceColumn] as number;
+        const bookedUnits = bookedUnitsOnDate(bookings ?? [], isoDate);
+        const available = room.total_units - bookedUnits;
 
-      return { room, date: row.date as string, price };
+        if (available > 0) {
+          // Les résultats sont triés par prix croissant : la première date
+          // disponible qu'on rencontre est la moins chère possible.
+          return { room, date: isoDate, price };
+        }
+      }
+
+      return null; // aucune date disponible dans toute la plage demandée
     })
   );
 
@@ -138,7 +167,8 @@ async function runSearchCheapestOption(args: {
   if (affordable.length === 0) {
     return {
       found: false,
-      message: "Aucune chambre disponible ne correspond à ces critères sur cette période.",
+      message:
+        "Aucune chambre disponible ne correspond à ces critères sur cette période (soit trop chère, soit déjà complète).",
     };
   }
 
