@@ -14,8 +14,15 @@ type NightPrice = {
   available: boolean;
 };
 
+// Convertit en YYYY-MM-DD à partir des composants LOCAUX de la date (pas
+// toISOString(), qui convertit en UTC et décale d'un jour dans les fuseaux
+// horaires en avance sur UTC, comme UTC+1 — ex: minuit local le 21 devient
+// 23h le 20 en UTC, donc toISOString() renverrait "20" au lieu de "21").
 function toIsoDate(date: Date): string {
-  return date.toISOString().split("T")[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 // Toutes les nuits entre checkIn (inclus) et checkOut (exclu) — comme une
@@ -160,7 +167,7 @@ export default function PriceSummary({
         {nights.map((n) => (
           <li key={n.date} className="flex justify-between">
             <span className={!n.available || n.price === null ? "text-red-500" : ""}>
-              {dateFormatter.format(new Date(n.date + "T00:00:00Z"))}
+              {dateFormatter.format(new Date(n.date + "T00:00:00"))}
               {!n.available && " — indisponible"}
               {n.available && n.price === null && " — prix non défini"}
             </span>
