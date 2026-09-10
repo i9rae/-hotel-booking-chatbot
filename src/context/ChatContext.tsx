@@ -3,8 +3,10 @@ import { createContext, useContext, useState, ReactNode } from "react";
 export interface SuggestedRoom {
   roomId: number; // legacy_id, correspond à room.id côté frontend (route /room/:id)
   name: string;
-  date: string; // YYYY-MM-DD
-  price: number;
+  checkIn: string; // YYYY-MM-DD
+  checkOut: string; // YYYY-MM-DD (exclusif, comme une vraie réservation)
+  nights: number;
+  totalPrice: number;
   guests: number | null;
 }
 
@@ -60,8 +62,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           ? {
               roomId: data.toolResult.room_id,
               name: data.toolResult.room_name,
-              date: data.toolResult.date,
-              price: data.toolResult.price,
+              checkIn: data.toolResult.check_in,
+              checkOut: data.toolResult.check_out,
+              nights: data.toolResult.nights,
+              totalPrice: data.toolResult.total_price,
               guests: data.toolResult.guests ?? null,
             }
           : undefined;
@@ -99,3 +103,4 @@ export function useChatContext() {
   }
   return context;
 }
+

@@ -23,17 +23,11 @@ export default function ChatWidget() {
     setInput("");
   };
 
-  // Au clic sur "Voir cette chambre" : pré-remplit le formulaire partagé
-  // (check-in = date trouvée, check-out = +1 nuit puisque le chatbot ne
-  // cherche que la date la moins chère, pas une durée de séjour) puis
-  // redirige vers la page de la chambre.
+  // Au clic sur "Voir cette chambre" : pré-remplit le formulaire partagé avec
+  // les vraies dates du séjour trouvé par le chatbot, puis redirige.
   const handleViewRoom = (room: SuggestedRoom) => {
-    const checkInDate = new Date(room.date + "T00:00:00");
-    const checkOutDate = new Date(checkInDate);
-    checkOutDate.setDate(checkOutDate.getDate() + 1);
-
-    setCheckIn(checkInDate);
-    setCheckOut(checkOutDate);
+    setCheckIn(new Date(room.checkIn + "T00:00:00"));
+    setCheckOut(new Date(room.checkOut + "T00:00:00"));
 
     if (room.guests) {
       const clamped = Math.min(Math.max(room.guests, 1), 8);
@@ -99,3 +93,4 @@ export default function ChatWidget() {
     </>
   );
 }
+

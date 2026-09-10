@@ -19,7 +19,7 @@ const tools = [
     function: {
       name: "search_cheapest_option",
       description:
-        "Cherche, dans le calendrier de prix réel de l'hôtel, la chambre et la date les moins chères sur une plage de dates, selon le budget et le nombre de personnes du client.",
+        "Cherche, dans le calendrier de prix réel de l'hôtel, la chambre et la période de séjour (N nuits consécutives) les moins chères au total sur une plage de dates flexible, selon le budget par nuit et le nombre de personnes du client.",
       parameters: {
         type: "object",
         properties: {
@@ -39,6 +39,11 @@ const tools = [
             type: "number",
             description: "Nombre total de personnes, adultes + enfants (optionnel)",
           },
+          nights: {
+            type: "number",
+            description:
+              "Nombre de nuits du séjour souhaité (optionnel, défaut 1 si non précisé). Le chatbot cherche la fenêtre de N nuits consécutives la moins chère au total dans la plage de dates flexible.",
+          },
           keywords: {
             type: "string",
             description:
@@ -51,6 +56,7 @@ const tools = [
   },
 ];
 
+
 // Renvoie le nom de colonne à interroger dans daily_rates selon le nombre
 // de personnes demandé. "price" (colonne de base) sert de valeur par défaut
 // quand le client n'a pas précisé de nombre de personnes.
@@ -59,6 +65,7 @@ function priceColumnForGuests(guests?: number): string {
   const clamped = Math.min(Math.max(Math.round(guests), 1), 8);
   return `price_${clamped}`;
 }
+
 
 // Nombre de chambres déjà réservées (status confirmed) qui couvrent cette
 // date. end_date est exclusive (date de départ), comme une vraie réservation.
@@ -69,14 +76,24 @@ function bookedUnitsOnDate(
   return bookings.filter((b) => isoDate >= b.start_date && isoDate < b.end_date).length;
 }
 
+
+function addDays(isoDate: string, days: number): string {
+  const d = new Date(isoDate + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
+
 async function runSearchCheapestOption(args: {
   start_date: string;
   end_date: string;
   max_budget?: number;
   guests?: number;
+  nights?: number;
   keywords?: string;
 }) {
   const priceColumn = priceColumnForGuests(args.guests);
+  const nights = Math.max(1, Math.round(args.nights ?? 1));
 
   // 1. Sélectionne les chambres candidates : assez grandes pour le nombre de
   // personnes, et correspondant aux mots-clés si le client en a donné.
@@ -114,10 +131,21 @@ async function runSearchCheapestOption(args: {
     };
   }
 
-  // 2. Pour chaque chambre candidate : récupère les prix de daily_rates sur la
-  // plage (triés du moins cher au plus cher) et les réservations existantes
-  // qui chevauchent cette plage, puis prend la date la moins chère parmi
-  // celles où il reste au moins une unité disponible.
+  // La dernière date de début de fenêtre possible : il faut que les `nights`
+  // nuits consécutives tiennent avant end_date.
+  const lastWindowStart = addDays(args.end_date, -(nights - 1));
+
+  if (lastWindowStart < args.start_date) {
+    return {
+      found: false,
+      message: `La plage de dates est trop courte pour un séjour de ${nights} nuit(s).`,
+    };
+  }
+
+  // 2. Pour chaque chambre candidate : récupère tous les prix + réservations
+  // de la plage, puis cherche la fenêtre de `nights` nuits consécutives dont
+  // la somme est la plus basse, en ne gardant que les fenêtres où CHAQUE
+  // nuit est disponible (et sous le budget par nuit, si précisé).
   const candidates = await Promise.all(
     rooms.map(async (room) => {
       const [{ data: rates, error: ratesError }, { data: bookings, error: bookingsError }] =
@@ -127,9 +155,7 @@ async function runSearchCheapestOption(args: {
             .select(`date, ${priceColumn}`)
             .eq("room_type_id", room.id)
             .gte("date", args.start_date)
-            .lte("date", args.end_date)
-            .not(priceColumn, "is", null)
-            .order(priceColumn, { ascending: true }),
+            .lte("date", args.end_date),
           supabase
             .from("bookings")
             .select("start_date, end_date")
@@ -141,30 +167,71 @@ async function runSearchCheapestOption(args: {
 
       if (ratesError || bookingsError || !rates) return null;
 
-      for (const row of rates as unknown as Record<string, string | number>[]) {
-        const isoDate = row.date as string;
-        const price = row[priceColumn] as number;
-        const bookedUnits = bookedUnitsOnDate(bookings ?? [], isoDate);
-        const available = room.total_units - bookedUnits;
+      const priceByDate = new Map<string, number>();
 
-        if (available > 0) {
-          // Les résultats sont triés par prix croissant : la première date
-          // disponible qu'on rencontre est la moins chère possible.
-          return { room, date: isoDate, price };
+      for (const row of rates as unknown as Record<string, string | number | null>[]) {
+        const price = row[priceColumn];
+
+        if (typeof price === "number") {
+          priceByDate.set(row.date as string, price);
         }
       }
 
-      return null; // aucune date disponible dans toute la plage demandée
+      let best: { start: string; total: number } | null = null;
+
+      for (
+        let start = args.start_date;
+        start <= lastWindowStart;
+        start = addDays(start, 1)
+      ) {
+        let windowTotal = 0;
+        let windowValid = true;
+
+        for (let i = 0; i < nights; i++) {
+          const night = addDays(start, i);
+          const price = priceByDate.get(night);
+
+          if (price === undefined) {
+            windowValid = false;
+            break;
+          }
+
+          if (args.max_budget && price > args.max_budget) {
+            windowValid = false;
+            break;
+          }
+
+          const bookedUnits = bookedUnitsOnDate(bookings ?? [], night);
+
+          if (room.total_units - bookedUnits <= 0) {
+            windowValid = false;
+            break;
+          }
+
+          windowTotal += price;
+        }
+
+        if (windowValid && (!best || windowTotal < best.total)) {
+          best = { start, total: windowTotal };
+        }
+      }
+
+      if (!best) return null;
+
+      return {
+        room,
+        checkIn: best.start,
+        checkOut: addDays(best.start, nights),
+        total: best.total,
+      };
     })
   );
 
-  const valid = candidates.filter((c): c is NonNullable<typeof c> => c !== null);
+  const valid = candidates.filter(
+    (c): c is NonNullable<typeof c> => c !== null
+  );
 
-  const affordable = args.max_budget
-    ? valid.filter((c) => c.price <= args.max_budget!)
-    : valid;
-
-  if (affordable.length === 0) {
+  if (valid.length === 0) {
     return {
       found: false,
       message:
@@ -172,19 +239,23 @@ async function runSearchCheapestOption(args: {
     };
   }
 
-  const best = affordable.sort((a, b) => a.price - b.price)[0];
+  const best = valid.sort((a, b) => a.total - b.total)[0];
 
   return {
     found: true,
     room_id: best.room.legacy_id,
     room_name: best.room.name,
     room_description: best.room.description,
-    date: best.date,
-    price: best.price,
+    check_in: best.checkIn,
+    check_out: best.checkOut,
+    nights,
+    total_price: best.total,
+    price_per_night: Math.round((best.total / nights) * 100) / 100,
     max_person: best.room.max_person,
     guests: args.guests ?? null,
   };
 }
+
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
@@ -198,12 +269,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const systemPrompt = `Tu es l'assistant de réservation de l'hôtel. Tu aides les clients à
-trouver la chambre la moins chère selon leurs contraintes (dates flexibles, budget, nombre de
-personnes, équipements). Si le client décrit une ambiance ou une caractéristique précise (vue
-sur mer, romantique, jacuzzi, familiale, balcon...), transmets ces mots-clés dans le paramètre
-keywords de l'outil. Utilise l'outil search_cheapest_option dès que tu as au moins une plage de
-dates. Si des informations manquent (dates, nombre de personnes), demande-les avant d'appeler
-l'outil. Réponds toujours en français, de façon concise et chaleureuse.`;
+trouver la chambre la moins chère selon leurs contraintes (dates flexibles, nombre de nuits,
+budget par nuit, nombre de personnes). Si le client précise une durée de séjour (ex: "3 nuits",
+"une semaine"), transmets-la dans le paramètre nights de l'outil — sinon laisse-le vide (défaut:
+1 nuit). Si le client décrit une ambiance ou une caractéristique précise (vue sur mer, romantique,
+jacuzzi, familiale, balcon...), transmets ces mots-clés dans le paramètre keywords. Utilise l'outil
+search_cheapest_option dès que tu as au moins une plage de dates. Si des informations manquent
+(dates, nombre de personnes), demande-les avant d'appeler l'outil. Réponds toujours en français,
+de façon concise et chaleureuse.`;
 
   const messages = [
     { role: "system", content: systemPrompt },
